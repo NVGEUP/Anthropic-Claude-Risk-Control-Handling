@@ -1,33 +1,8 @@
-# 网络隐私配置与验收手册
+# Anthropic/Claude Risk Control Handling
 
-在 Windows 和 Android 上为 Claude 指定一条出口，同时让国内网站继续按原规则直连。手册记录每项设置的用途、操作步骤、验收依据和回退方法。文中的结果来自一次实际配置，保留了测试范围和例外。
+**选择语言 · Choose your language**
 
-| 从这里开始 | 内容 |
+| 语言 / Language | 手册 / Guide |
 | --- | --- |
-| [Windows 操作步骤](WINDOWS.md) | Clash Verge Rev、Claude Code、Chrome WebRTC 和时区恢复 |
-| [Android 操作步骤](ANDROID.md) | FlClash、GBox 安装的 Claude、VPN 接管与回退 |
-| [共用分流与 DNS](ROUTING.md) | 专用策略组、匹配顺序、加密解析和启动解析例外 |
-| [11 项验收与检测网站](VERIFICATION.md) | 怎么测、怎么看结果、哪些结论仍需验证 |
-
-## 配置完成后能观察到什么
-
-| 项目 | Windows | Android |
-| --- | --- | --- |
-| 国内网页 | 受测哔哩哔哩 HTTPS 命中 `DIRECT` | 同一站点的受测 HTTPS 命中 `DIRECT` |
-| Claude 出口 | Claude Code 读取本地代理设置，匹配域名走专用组 | Claude、GBox、microG 的受测连接分别命中应用规则 |
-| 普通 DNS | 随机域名与 TXT 样本只见预期递归解析器，核心里可见代理内 DoH | 浏览器和核心样本得到相同结果 |
-| DNS 例外 | 节点域名保留加密直连启动解析 | 同左 |
-| WebRTC | 严格设置后的受测页面未返回候选地址 | 10 个 STUN 目标未见公网候选，仍有 VPN 内部地址 |
-| 时区 | Windows 和 Chrome 均为东八区，Claude Code 进程单独使用洛杉矶时区 | 手机系统保持东八区 |
-| VPN 停止 | 未验证故障锁网 | 手动关闭 VPN 后恢复普通联网 |
-
-Chrome 独立使用洛杉矶时区的实验已撤回。移除扩展后新标签页恢复，五种网页环境均读到东八区。恢复步骤见 [Windows 手册](WINDOWS.md#chrome-新标签页恢复)。
-
-## 建议的操作顺序
-
-1. **先备份。** 记录当前订阅、普通节点选择和规则模式，分别备份代理配置与应用设置。
-2. **按平台配置。** 建立单节点专用组，把专用规则排在通用规则之前，再接管 DNS。Windows 和 Android 的进程识别选项不同。
-3. **沿真实路径验收。** 分别检查国内 HTTPS、Claude 连接、DNS 上游和 WebRTC 候选。把能复现的结果写入本机记录。
-4. **保留回退点。** 确认控制接口关闭、临时转发已撤销，再保存一份最终配置备份。
-
-历史验证版本为 Clash Verge Rev 2.5.8、Mihomo 1.19.32 和 FlClash 0.8.99。更换版本、节点或网络后，应重新执行相关验收。复测记录只需保留版本、规则、候选类型和结论。含节点凭据、设备标识或公网地址的原始材料应留在本机。
+| 简体中文 | [进入中文手册](zh-CN/README.md) |
+| English | [Open the English guide](en/README.md) |
