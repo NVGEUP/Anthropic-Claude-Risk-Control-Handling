@@ -2,50 +2,59 @@
 
 [Guide home](README.md) · [Windows](WINDOWS.md) · [Android](ANDROID.md) · [Shared routing and DNS](ROUTING.md)
 
-Before collecting a sample, confirm that VPN or TUN capture is active and the proxy client is in Rule mode. For each check, record the **action, observation, and conclusion** separately. Compare actual addresses locally. In a shared report, use categories such as expected proxy egress, local public address, or private host candidate.
+Confirm the active profile, **Rule** mode, and TUN/VPN capture. Open the core's **Connections** view. Make a **new request** from the browser or application you mean to test. Record the time, destination, matched rule, outbound route, and observation. An existing connection can retain its old path, and a browser tab is not a measurement of the Claude process.
 
-## Verification matrix
+## What to test and how to read it
 
-| # | Check | How to test | Recorded result and limits |
+| # | Test | Why it works | Recorded observation and boundary |
 | --- | --- | --- | --- |
-| 1 | Egress IP | Sample HTTPS egress from the target client and compare results across services. | Short samples agreed. A carrier label cannot establish exclusive use or prior reputation. |
-| 2 | Egress consistency | Switch the ordinary group, inspect the dedicated group, and repeat the egress sample. | The dedicated group contained one node. Its provider can still change the actual egress IP. |
-| 3 | TCP, UDP, and WebRTC | Check the outer proxy TCP/TLS transport, then collect ICE candidates using both domestic and overseas STUN targets. | After hardening, sampled Windows pages returned no candidates. Android retained a VPN-internal host candidate. |
-| 4 | TLS | Check certificate validation settings and make a certificate-validated HTTPS request to the service. | Auxiliary probes validated certificates. The outer proxy and the application establish separate TLS handshakes. |
-| 5 | DNS | Generate fresh random subdomains for browser and UDP/TCP TXT probes. Inspect upstream connections. | Sampled application queries used the expected DoH route. Proxy hostname bootstrap used a direct exception. |
-| 6 | IPv6 | Inspect DNS policy, VPN address families, and reachability of a literal IPv6 destination. | Windows retained system IPv6. The tested phone had no IPv6 route. |
-| 7 | Dedicated Claude routing | Check rules and final routes for API, CDN, and related process connections. | Observations supported Windows domain matching and the three Android application rules. |
-| 8 | Rule priority | Inspect the merged order and open a domestic site. | Dedicated rules came first. Sampled domestic HTTPS still matched DIRECT. |
-| 9 | Connection reuse | Send consecutive unauthenticated requests, count TLS connections, and include a short idle interval. | Five auxiliary requests shared one TLS connection, including after a ten-second idle period. HTTP 401 indicated an unauthenticated request. |
-| 10 | Concurrency and limits | An authorized real workload and service-side limit records are needed for this check. | No account stress test or paid model call was made. The tests establish no safe concurrency limit. |
-| 11 | Path and latency | Record the proxy chain, response latency, and visible edge-site labels together. | Only short samples were collected. An edge location does not identify the Claude backend or the complete route. |
+| 1 · Public egress | Query two HTTPS echo services on the same intended route. First confirm their matching group in the core. | An echo service sees the public source of that HTTPS connection. | Short samples agreed. ISP and city labels cannot establish exclusivity, reputation, or physical location. |
+| 2 · Egress stability | Change the **ordinary group**, open a fresh connection, then recheck the dedicated group and egress. | If the two groups share the same selector, changing the ordinary node can move Claude too. | The dedicated group had one node. Its provider can still change the public IP behind it. |
+| 3 · TCP, UDP, and WebRTC | Inspect the node's outer TCP/TLS transport and gather browser ICE candidates using domestic and overseas STUN targets separately. | A page can open UDP sockets independently of its HTTPS connection. | Sampled Windows pages returned no candidates. Android retained a VPN-internal `host` candidate. |
+| 4 · TLS | Check that node certificate validation is enabled. Make a normal certificate-validated HTTPS request to the service. | The outer proxy and inner application each negotiate TLS. Certificate validation checks peer identity. | Auxiliary probes validated certificates. This cannot establish that the TLS fingerprint matches a browser's. |
+| 5 · DNS | Use fresh random domains. Compare the authoritative report with the core's DoH outbound chain. Record bootstrap separately. | The report identifies who looked up the name. The chain shows how the device reached its resolver. | Application samples showed only Cloudflare. The node hostname used a direct encrypted exception. |
+| 6 · IPv6 | Compare AAAA answers, routes, and reachability of a literal IPv6 address. | An app that already knows the address can skip DNS entirely. | Windows retained its IPv6 stack. The tested phone had no IPv6 route. |
+| 7 · Dedicated Claude route | Trigger traffic in the actual app. For API and CDN connections, inspect the owner, matched rule, and final node. | A domain rule matches the destination. A package rule matches the connection owner. | Windows domain matches and the Android Claude, GBox, and microG package matches were observed. |
+| 8 · Rule priority | Find the dedicated and domestic rules in the generated list, then open a domestic site. | An earlier catch-all or regional rule can claim the connection before a later rule sees it. | Dedicated rules came first. The sampled domestic HTTPS connection matched `DIRECT`. |
+| 9 · Connection reuse | Send consecutive requests from the same test client, pause between some requests, and count new TLS connections. | Reuse means multiple requests shared a connection. A TCP keepalive setting alone cannot show this. | Five auxiliary requests used one TLS connection, including after a ten-second idle interval. `401` meant unauthenticated. |
+| 10 · Concurrency and limits | During a normal authorized workload, record request volume, `429` responses, and `retry-after` when present. | Limits are applied by the service. Latency and public egress cannot determine an account's concurrency threshold. | No account stress test or paid model call was made. No safe concurrency figure follows. [Official rate limits](https://platform.claude.com/docs/en/api/rate-limits) |
+| 11 · Path and latency | Take repeated samples. Log the proxy chain, elapsed time, and edge label separately. | Total time includes network and service work. An edge label identifies only the visible ingress point. | Short samples cannot reconstruct the complete route or locate the Claude backend. |
 
-These checks use a third-party checklist as their organizing scheme. The probes do not verify account risk controls, device recognition, or long-term model stability. [Original checklist](https://ip.net.coffee/claude/claudecode.html)
+The eleven topics follow a [third-party checklist](https://ip.net.coffee/claude/claudecode.html). A practical control for egress tests: if ipify matches the ordinary group, that is the only group it measured. To isolate the dedicated group in a **test copy**, temporarily place `DOMAIN,api.ipify.org,Claude-Fixed` ahead of the general rules. Make a fresh request, check its chain, then remove the test rule. Check Claude's own connections separately.
 
-## Verify DNS
+## DNS: check both the resolver and the outbound connection
 
-1. In the actual browser on the device being tested, start a random-domain DNS test. Use a fresh test session every time. Inspect the **recursive resolvers** observed by the authoritative service.
-2. Test ordinary DNS on the same device. On Windows, use `Resolve-DnsName <fresh-test-domain> -Type TXT -DnsOnly`. Use a different fresh name with `-TcpOnly` for TCP port 53. Check the core's transport records for the UDP path. Historical Android checks issued queries separately from the phone's browser and its core.
-3. In the core's connections view, locate the Cloudflare DoH connections and check that their outbound chains include the dedicated group. Record proxy-hostname bootstrap separately.
-4. If the report shows an ISP resolver or application queries using an unexpected direct upstream, inspect TUN port 53 interception, `direct-nameserver`, fallback servers, appended system DNS, and application-managed DoH/DoT.
-5. If you only have synthetic A records from `fake-ip`, or if all requests time out, record the result as **inconclusive**. An authorized physical-interface capture can provide further evidence about traffic leaving directly.
+1. Start a new DNS test in the actual device browser. Let the service generate **fresh random domains** so an earlier cache entry cannot answer the query. The authoritative service sees the recursive resolver that asked for the name. Its outward-facing IP may differ from the DoH endpoint IP you configured.
+2. On the same Windows device, run the commands below with two new test names the service can identify in its report. The first uses ordinary resolution, usually starting with UDP; the second forces TCP. Check the core for the actual transport. Even if no TXT record exists, check whether the authoritative service saw the query. On Android, distinguish browser-originated and core-originated probes.
 
-On Windows, random browser queries plus six UDP and six TCP TXT probes showed only Cloudflare resolvers. On Android, twelve random browser domains and twelve core TXT queries also showed only Cloudflare. Both systems' core DoH routes were inspected. The bash.ws report also displayed `DNS may be leaking.` Retain that message and interpret it alongside the actual resolver and routing records.
+```powershell
+$udpName = Read-Host 'Fresh test domain 1'
+Resolve-DnsName -Name $udpName -Type TXT -DnsOnly
+$tcpName = Read-Host 'Fresh test domain 2'
+Resolve-DnsName -Name $tcpName -Type TXT -DnsOnly -TcpOnly
+```
 
-## Verify WebRTC
+3. Correlate the same test period with the core's connections. Application DoH should use `Claude-Fixed`. Record the direct AliDNS proxy-hostname lookup separately. If an unexpected ISP resolver appears, check port 53 interception, `direct-nameserver`, alternate upstreams, appended system DNS, then browser DoH or Android Private DNS. Even an unexpected direct connection to the *same* public resolver requires the outbound chain to distinguish it.
+4. If the only evidence is a synthetic A record or every test timed out, record **inconclusive**. To check for additional direct DNS traffic from the device, an authorized physical-interface capture can correlate time and endpoints with processes and test activity. Encrypted query contents are normally unreadable on the physical interface.
 
-| Observation | What to record |
+Only Cloudflare appeared in the recorded Windows browser queries and the six UDP and six TCP TXT probes. The same held for twelve Android browser domains and twelve core TXT queries. Both platforms' core DoH routes were checked. bash.ws also displayed `DNS may be leaking.` Keep the warning with the actual resolvers and routes when interpreting it. [Microsoft command reference](https://learn.microsoft.com/en-us/powershell/module/dnsclient/resolve-dnsname) · [DoH protocol](https://www.rfc-editor.org/rfc/rfc8484.html)
+
+## WebRTC: inspect the candidates a page can see
+
+Reload the page and gather candidates separately for domestic and overseas targets. Wait for gathering to finish, or record the timeout. An early Google-only test missed a domestic direct route. If the test site does not let you select targets, use the [WebRTC project's Trickle ICE page](https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/) with one chosen STUN server per run. Compare each address privately with the expected proxy egress and known direct address.
+
+| Page observation | How to interpret it |
 | --- | --- |
-| `host` | Note a local interface, VPN-internal address, or mDNS name. Distinguish the actual LAN from the VPN interface. |
-| `srflx` | STUN discovered a mapped address. Locally compare it with the direct public address and the expected proxy egress. |
-| `relay` | Record the address allocated by a TURN relay separately. |
-| Empty candidates, API unavailable, or timeout | Record these as distinct outcomes. Compare several STUN targets and the core's rule hits. |
+| `host` | Comes from a local interface. It may be a LAN address, a VPN address, a publicly routable address, or an mDNS name. Check the address class and interface. |
+| `srflx` | STUN reported a mapped address. A match with the direct public IP is a leak in this test. A match with proxy egress still means the page obtained a public address. |
+| `relay` | TURN allocated a relay address. It can appear alongside other candidates, so read the complete list. |
+| No candidates | Distinguish an unavailable API, completed gathering with an empty list, and a timeout. An unreachable test server can also cause a timeout. |
 
-Refresh the multi-target test page. The initial Google-only STUN check missed a domestic direct route. After hardening, the sampled Windows top-level page, iframe, and compatibility API returned no candidates. The ten-target Android sample had no public candidate and retained a VPN-internal host address. The core recorded Chrome UDP rejections on Android. Repeat relevant checks after browser updates and network changes.
+If the requirement is *no address visible to the page*, record even a VPN-internal `host` as **still visible**. The sampled Windows page and iframe yielded no candidates; the core's fallback rule recorded no hits in that run. Android's ten-target sample yielded no public candidate, retained an internal `host` address, and showed Chrome UDP rejections in the core. [ICE candidate definitions](https://www.rfc-editor.org/rfc/rfc8445.html)
 
-## Verify the time zone
+## Time zone: read it in the relevant process
 
-Run the following read-only snippet in DevTools Console on an ordinary page. The output describes the JavaScript context where it ran.
+Run this read-only snippet in DevTools Console on an ordinary page. `Intl` reports the zone used by the current environment. January and July offsets distinguish a fixed UTC+8 setting from a zone such as Los Angeles that observes daylight saving time.
 
 ```javascript
 const year = new Date().getUTCFullYear();
@@ -56,19 +65,15 @@ const year = new Date().getUTCFullYear();
 })
 ```
 
-For this UTC+8 setting, the expected values are `Asia/Shanghai` and `-480 / -480`. For `America/Los_Angeles` they are typically `480 / 420` in January and July. The recorded verification also covered a cross-origin iframe, Web Worker, Shared Worker, and Service Worker. After the time-zone extension was removed, all five contexts reported UTC+8. Long-term browser stability requires separate testing.
+`getTimezoneOffset()` returns UTC minus local time in minutes. `Asia/Shanghai` therefore gives `-480 / -480`. `America/Los_Angeles` normally gives `480 / 420`. The console represents the selected script context. For Claude Code use the [Windows process check](WINDOWS.md); for the phone check the system setting separately. [Offset sign and daylight saving time](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/getTimezoneOffset)
 
-## Test sites
+## Test sites and remaining gaps
 
-Opening an external test sends a request from the test connection and exposes its public source IP to the service. Keep raw results locally and share redacted observations.
-
-| Site | Use in this procedure |
+| Site | Use |
 | --- | --- |
-| [IPPure WebRTC](https://ippure.com/en/Browser-WebRTC-Leak-Detect.html) · [Net.Coffee WebRTC](https://ip.net.coffee/webrtc/) | Cross-check multiple STUN targets. |
-| [IPPure DNS](https://ippure.com/en/DNS-Leak-Detect.html) · [Net.Coffee DNS](https://ip.net.coffee/dns/) · [bash.ws](https://bash.ws/dnsleak) | Compare recursive resolvers with authoritative records for fresh domains. |
-| [ipify](https://api.ipify.org?format=json) · [Cloudflare trace](https://1.1.1.1/cdn-cgi/trace) | Sample HTTPS egress and Cloudflare edge information. |
-| [Bilibili](https://www.bilibili.com/) | Verify a direct domestic HTTPS connection against the connection log. |
+| [ipify](https://api.ipify.org?format=json) · [Cloudflare trace](https://1.1.1.1/cdn-cgi/trace) | Read the public source of this HTTPS connection. The trace also reports the Cloudflare edge that received it. |
+| [IPPure DNS](https://ippure.com/en/DNS-Leak-Detect.html) · [Net.Coffee DNS](https://ip.net.coffee/dns/) · [bash.ws](https://bash.ws/dnsleak) | Compare the recursive resolvers seen in this run with the core's connection records. |
+| [IPPure WebRTC](https://ippure.com/en/Browser-WebRTC-Leak-Detect.html) · [Net.Coffee WebRTC](https://ip.net.coffee/webrtc/) | Cross-check exposed candidate types and address classes. |
+| [Bilibili](https://www.bilibili.com/) | Exercise a real domestic HTTPS route and confirm `DIRECT` in the log. |
 
-## Scenarios still to test
-
-Coverage did not include device-wide physical-interface capture, all application-managed DNS, reboots, network handovers, long screen-off periods, unexpected VPN exit, hours-long model streaming, or full login, voice, and video workflows in apps such as WeChat. On Android, manually stopping the VPN deliberately restores ordinary connectivity. A domestic website reached through DIRECT can see the source of that connection.
+Each test service sees the public source of the request it receives. Share categories such as expected proxy egress, direct public address, or internal VPN address in place of raw values. The recorded tests did not cover device-wide physical-interface capture, every app-managed resolver, reboots, network handovers, long screen-off periods, unexpected VPN exit, hours-long model streams, or full WeChat login, voice, and video workflows.
