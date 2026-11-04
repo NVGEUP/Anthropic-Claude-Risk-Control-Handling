@@ -1,14 +1,13 @@
 # Android 操作步骤
 
-[手册首页](README.md) · [共用分流与 DNS](ROUTING.md) · [验收清单](VERIFICATION.md)
+[手册首页](README.md) · [共用分流与 DNS](ROUTING.md) · [11 项验收](VERIFICATION.md)
 
-本次使用 FlClash 0.8.99。Claude 从 GBox 下载，但系统中存在独立软件包。先确认连接的实际归属，再决定应用规则的范围。
+本例使用 FlClash 0.8.99。手机先决定哪些应用进入 VPN，Mihomo 才能决定这些连接怎样出站。能看到 VPN 图标，只说明隧道已建立。
 
-## 1. 核对软件包并导出备份
+## 1. 找出真正发请求的应用，保存原配置
 
-1. 解锁手机并通过 USB 连接电脑。若使用 ADB，在手机上确认 USB 调试授权，运行 `adb devices`，设备状态应为 `device`。
-2. 检查以下包名是否存在。若系统只显示容器，应在 FlClash 连接页先确认真正发出请求的进程。
-3. 记录普通策略组选择、模式与 VPN 状态。在 FlClash 打开 **Tools → Backup and restore → Backup**，新导出一份完整备份。把原件留在本机安全位置，修改副本。
+1. 打开 Claude，在 FlClash 的**连接**页观察新连接的包名。本例从 GBox 下载的 Claude 有独立包名；如果连接显示来自容器，应按实际显示的包名匹配。下载来源和联网进程可以不同。
+2. 如使用电脑核对，连接 USB、在手机上允许本次调试，运行 `adb devices`。状态为 `device` 后再执行下列查询。它们只确认包已安装；连接归属仍看第 1 步。`com.follow.clash` 是 FlClash 本身。[Android ADB](https://developer.android.com/tools/adb)
 
 ```powershell
 adb shell pm list packages com.anthropic.claude
@@ -17,19 +16,23 @@ adb shell pm list packages com.google.android.gms
 adb shell pm list packages com.follow.clash
 ```
 
-## 2. 绑定当前订阅的持久覆写
+3. 记下活动订阅、普通节点、模式、VPN 开关及应用访问控制范围。在 **Tools → Backup and restore → Backup** 导出原 ZIP，只编辑副本。稍后使用的“全部恢复”会同时替换多个设置，单独记下一个节点名不足以还原。
 
-先按共用说明准备单节点专用组、DNS 和原订阅规则。手机启用应用级分流，只有 Chrome 的 UDP 在首条被拒绝。专用节点保留 UDP 转发，以便应用自身的 NTP 等请求进入该组。[规则顺序与 DNS](ROUTING.md)
+## 2. 把脚本绑到正在使用的订阅
 
-历史操作修改了备份的这三处。若通过 FlClash 界面编辑，重新导出的备份也可按同样的对应关系核对。
+在活动订阅的 **Overwrite / 覆写** 中选 **Script / 脚本**，绑定[共用脚本](ROUTING.md)，设置 `android = true` 和源节点名，然后重新应用。脚本绑定属于某个订阅；编辑了另一份订阅时，VPN 可以正常开启却仍运行旧规则。[该版本的覆写界面](https://github.com/chen08209/FlClash/blob/v0.8.99/lib/views/profiles/overwrite/overwrite.dart)
 
-| 备份位置 | 操作 | 验收 |
-| --- | --- | --- |
-| `config.json` | 读取 `currentProfileId`，按下一节修改 VPN 和核心字段 | 数值与原备份一致，普通设置保留 |
-| `scripts/<script_id>.js` | 写入当前订阅使用的 Mihomo 覆写逻辑 | 生成配置的前四条规则与下方一致 |
-| `database.sqlite` | 在 `scripts` 注册本地脚本，将当前 `profiles` 行的 `overwrite_type` 设为 `script`、`script_id` 设为对应值；在 `selected_map` 中仅更新专用组 | 原普通节点选择保留，`PRAGMA integrity_check` 返回 `ok` |
+若复现历史上的**离线备份编辑**，下面三处必须指向同一份配置。通过界面完成绑定的读者可直接核对生成的四条规则。
 
-使用离线备份方式时，先在副本内确认 `profiles/<currentProfileId>.yaml` 存在。在同一数据库事务内写入脚本记录并更新当前订阅。JSON 与 SQLite 的 ID 可能超过 JavaScript Number 的精度，读写时使用能保留整数的解析器，如 Python 的标准 `json`。重新打包时让 `config.json` 和 `database.sqlite` 保持在 ZIP 根目录。遇到不同版本的字段结构，应先核对版本对应的实现。[FlClash 0.8.99 源码](https://github.com/chen08209/FlClash/tree/v0.8.99)
+| 在 ZIP 副本中做什么 | 为什么做、怎么核对 |
+| --- | --- |
+| 从 `config.json` 读取 `currentProfileId`，找到 `profiles/<currentProfileId>.yaml`。 | 手机可以保存多个订阅。先核对 ID 和文件，避免恢复成功后仍激活另一份配置。 |
+| 将脚本保存为 `scripts/<script_id>.js`。在 `database.sqlite` 的 `scripts` 表注册脚本，在同一事务里把对应 `profiles` 行的 `overwrite_type` 设为 `script`、`script_id` 设为同一个 ID。仅更新 `selected_map` 的专用组条目。 | 文件存代码，数据库决定哪个订阅调用它。事务让两项绑定一起成功或一起撤销；保留其余条目可保留普通节点选择。 |
+| 用能保留大整数的工具处理 ID（如 Python 标准 `json`），提交事务后运行 `PRAGMA integrity_check` 并关闭数据库，再打包。保持 `config.json` 与 `database.sqlite` 在 ZIP 根目录。 | ID 被舍入会指向错误记录，多套一层目录会改变导入路径。`ok` 只说明数据库结构完整，规则是否生效还要用连接来验证。 |
+
+[该版本的备份结构](https://github.com/chen08209/FlClash/blob/v0.8.99/lib/common/backup.dart) · [SQLite 完整性检查](https://www.sqlite.org/pragma.html#pragma_integrity_check)
+
+查看生成配置的前四条，顺序应如下。第一条仅拒绝 Chrome 的 UDP；后面三条按发起连接的软件包选用专用组，节点本身保留 UDP 转发能力。把 GBox 或 `com.google.android.gms`（本例是 microG）放进组，也会影响它们为其他应用发出的连接。
 
 ```text
 AND,((PROCESS-NAME,com.android.chrome),(NETWORK,UDP)),REJECT
@@ -38,41 +41,28 @@ PROCESS-NAME,com.gbox.android,Claude-Fixed
 PROCESS-NAME,com.google.android.gms,Claude-Fixed
 ```
 
-GBox 和 microG 规则会影响这两个进程的其他连接。历史连接记录分别观察到 Claude 的 API/CDN、GBox 的服务连接和 microG 的 Google 连接命中专用组。
+## 3. 设置 VPN 的接管范围
 
-## 3. 配置 VPN、DNS 和 IPv6
+| 设置与取值 | 原理及核对点 |
+| --- | --- |
+| `vpnProps.systemProxy: false`、`allowBypass: false` | 使用 Android VPN 虚拟接口，不额外公布 HTTP 系统代理，也不授权应用主动绕过 VPN。另查应用访问控制：若启用“只代理选中应用”，Claude、实际容器及待测浏览器都须在范围内。 |
+| `patchClashConfig.mode: rule`、`find-process-mode: always` | 按规则分流，并为连接查找所属应用。该版本借助系统查询连接的 UID，再映射到包名；共享 UID 或容器使界面实测尤其重要。 |
+| `vpnProps.dnsHijacking: true`；`patchClashConfig.tun.dns-hijack` 包含 `any:53`、`tcp://any:53` | 把经过 VPN 的常规 UDP/TCP 53 查询交给核心。Android 私人 DNS 或应用自带的加密 DNS 使用另一条连接，须单独验收。 |
+| `overrideDns: false`、`networkProps.appendSystemDns: false` | 本配置由订阅脚本生成 DNS。关闭额外的界面覆写和系统解析器追加，避免最终上游列表被换掉或混入其他服务器；以运行配置为准。 |
+| `vpnProps.ipv6: false`、`patchClashConfig.ipv6: false`、`dns.ipv6: false` | 三处分别控制 VPN 的 IPv6 地址与路由、核心的 IPv6 使用和 AAAA 答复。只关闭 AAAA 仍允许应用尝试已知 IPv6 地址，因此需单测字面地址。 |
 
-| 位置 | 本次取值 | 作用 |
-| --- | --- | --- |
-| `vpnProps.systemProxy` | `false` | 依赖系统 VPN 接管 |
-| `vpnProps.allowBypass` | `false` | 限制应用主动绕过 VPN |
-| `vpnProps.dnsHijacking` | `true` | 接管常规 DNS |
-| `vpnProps.ipv6` | `false` | 不为此 VPN 配置 IPv6 地址族 |
-| `patchClashConfig.mode` | `rule` | 保留国内和其他既有规则 |
-| `patchClashConfig.find-process-mode` | `always` | 获取手机进程信息以匹配包名 |
-| `patchClashConfig.ipv6`、`dns.ipv6` | `false` | 关闭核心 IPv6 和 AAAA 答复 |
-| `patchClashConfig.tun.dns-hijack` | `any:53`、`tcp://any:53` | 接管 UDP/TCP 53 |
-| `overrideDns`、`networkProps.appendSystemDns` | `false` | 使用覆写的 DNS，避免追加系统解析器 |
+在日常配置中关闭 **Allow LAN** 和 **External controller**，避免局域网设备接入本机代理或操作核心。字段和菜单按 0.8.99 编写；版本不同时先核对实现再导入。[FlClash VPN 实现](https://github.com/chen08209/FlClash/blob/v0.8.99/android/service/src/main/java/com/follow/clash/service/VpnService.kt) · [Android VPN 地址族与绕行](https://developer.android.com/reference/android/net/VpnService.Builder)
 
-同时在 FlClash 中确认 **Allow LAN** 和日常使用的 **External controller** 关闭。手机上的 `find-process-mode` 使用 `always`，其生效与否看运行中的规则命中。[Android VpnService.Builder](https://developer.android.com/reference/android/net/VpnService.Builder)
+## 4. 开启 VPN，用真实连接验收
 
-## 4. 导入并检查实际连接
+1. 离线编辑者通过 **Tools → Backup and restore → Restore → Restore all data** 导入副本。回到首页核对活动订阅、**Rule**、普通组和专用组，再打开 VPN。界面编辑者直接重新应用并开启 VPN。
+2. 依次打开 Claude 和用到的关联服务，在**连接**页查看新连接的包名、目标、命中规则和出站链。再用浏览器打开哔哩哔哩，核对其 HTTPS 为 `DIRECT`。这样分别验证了“应走代理”和“应走直连”的流量。
+3. 在手机浏览器做[随机域名 DNS 和多目标 WebRTC 检测](VERIFICATION.md)。记录中，10 个 STUN 目标未产生公网候选，仍有 VPN 内部 `host` 候选；核心也记录到 Chrome UDP 拒绝命中。
+4. 在 VPN 开启时核对 IPv6 路由，并用字面地址绕开 DNS，例如 `adb shell ping -6 -c 1 2606:4700:4700::1111`。本例报告无路由，手机浏览器的 IPv6 HTTPS 也失败。单次 ping 超时还可能是对方不回 ICMP；ADB shell 的结果也不能代替目标应用。
 
-1. 若修改了备份副本，在 **Tools → Backup and restore → Restore → Restore all data** 选择候选 ZIP。先确认手边保有可恢复的原备份。
-2. 返回 Dashboard，核对 **Rule**、普通节点选择和单节点专用组，再打开 VPN。
-3. 正常打开 Claude 及关联服务。在 FlClash 的连接页核对软件包、目标、匹配规则和最终出站。普通域名、动态遥测域名都应按所属进程判断。
-4. 用手机浏览器访问一个国内普通 HTTPS 页面。在连接页核对 `DIRECT`，再执行公网出口、DNS 与多 STUN 验收。[检测网站与判断标准](VERIFICATION.md)
+## 5. 验证手动开关，清理并回退
 
-## 5. 检查 VPN 边界并清理
-
-- **IPv6**　在 VPN 开启时核对地址族与路由，辅以字面 IPv6 目的地址测试，例如 `adb shell ping -6 -c 1 2606:4700:4700::1111`。历史样本返回无路由，浏览器 IPv6 HTTPS 同时失败。
-- **WebRTC**　历史 10 个 STUN 目标没有产生公网候选，仍返回 VPN 内部 `host` 地址。手机核心同时记录了 Chrome UDP 拒绝命中。
-- **手动开关**　本次保留手动关闭 VPN 后恢复正常联网的行为。关闭 VPN 时这套分流与 DNS 保护随之停止。未进行 VPN 崩溃锁网、重启、长期熄屏或网络切换试验。
-- **后台**　本次保留 FlClash 的 `deviceidle` 休眠豁免，可用 `adb shell dumpsys deviceidle whitelist` 在本机检查。厂商电池管理仍需按设备验证。
-- **结束测试**　关闭临时控制接口，只移除本次创建的 ADB 转发。历史现场对应 `adb forward --remove tcp:19090`、`adb forward --remove tcp:17890` 和 `adb reverse --remove tcp:18765`。未创建转发时跳过。
-
-## 6. 保存最终备份与回退
-
-重新导出最终备份，检查脚本绑定、原普通选择、规则顺序、DNS/VPN 和已关闭的控制口。若需撤销，先备份现状，再用 **Restore all data** 恢复修改前的 ZIP，复查国内网页与原应用。系统休眠豁免独立于备份，如需撤销该项，使用 `adb shell dumpsys deviceidle whitelist -com.follow.clash`。
-
-手机系统时区仍为东八区。测试覆盖了实际网络连接及短时 HTTP 复用，账户并发、长期运行和应用内定位信号不在本次验收范围内。
+- **手动关、再开 VPN。** 关闭后用普通网页验证联网，重新开启后再核对分流。这样保留了主动关闭时正常上网的选择；关闭期间这套规则停止工作。异常退出锁网、重启和网络切换未测。
+- **检查后台状态。** 本例给 FlClash 保留了 `deviceidle` 休眠豁免。`adb shell dumpsys deviceidle whitelist` 可查看；名单里存在应用只说明有豁免，不能证明熄屏数小时后仍在运行。[Android 休眠机制](https://developer.android.com/training/monitoring-device-state/doze-standby)
+- **撤销临时连接。** 用 `adb forward --list` 和 `adb reverse --list` 对照本次记录。仅删除自己创建的映射，例如 `adb forward --remove tcp:19090`、`adb forward --remove tcp:17890` 或 `adb reverse --remove tcp:18765`；随后关闭临时控制口。端口号须与自己的映射一致。
+- **保存可还原版本。** 导出验收通过的 ZIP。需要撤销时，备份现状，用 **Restore all data** 恢复原 ZIP，再核对订阅、VPN 和国内访问。休眠豁免是系统设置；若是本次新增，可用 `adb shell dumpsys deviceidle whitelist -com.follow.clash` 单独撤销。

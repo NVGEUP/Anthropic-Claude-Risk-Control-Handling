@@ -1,19 +1,18 @@
 # Windows setup
 
-[Guide home](README.md) · [Shared routing and DNS](ROUTING.md) · [Verification checks](VERIFICATION.md)
+[Guide home](README.md) · [Shared routing and DNS](ROUTING.md) · [11 verification checks](VERIFICATION.md)
 
-These steps cover Clash Verge Rev, Claude Code, and Chrome. Check each layer separately. TUN intercepts system traffic. Claude Code reads its proxy and time-zone settings at startup. Chrome's WebRTC settings affect which ICE candidates a page can obtain.
+Clash Verge Rev chooses the route for a connection. Claude Code selects a local proxy, and Chrome controls which WebRTC addresses a page can collect. Check each at the point where it takes effect.
 
-## 1. Record the starting configuration
+## 1. Record a baseline you can restore
 
-1. In Clash Verge, note the active subscription and the ordinary proxy group's current selection. Record the mixed proxy port, TUN setting, and routing mode.
-2. Open the application's configuration directory and locate the persistent override associated with the active subscription. A typical directory is `%APPDATA%\io.github.clash-verge-rev.clash-verge-rev\profiles`. Back up the relevant override and settings elsewhere on the same computer.
-3. Back up `~/.claude/settings.json`. Note any existing values in `env` so you can restore individual entries.
-4. Run `Get-TimeZone` in PowerShell and record the Windows time zone.
+1. In Clash Verge Rev's **Profiles** and **Settings**, note the active subscription, ordinary group selection, mixed port, mode, and TUN switch. Use the actual port later when pointing the CLI at the proxy.
+2. Open the configuration directory from the application and back up the active subscription's override script locally. A common location is `%APPDATA%\io.github.clash-verge-rev.clash-verge-rev\profiles`. Subscription refreshes rebuild the runtime configuration, so keep the script that produces it.
+3. Back up `~/.claude/settings.json`. Record its existing `env` values and Chrome's WebRTC options, and run `Get-TimeZone`. This gives you separate restore points for the CLI, browser, and proxy, and a reference for the system clock.
 
-## 2. Enable TUN in Rule mode
+## 2. Capture traffic, then route it by rule
 
-Select **Rule** in Clash Verge and turn on TUN. Check the generated configuration for the following fields. Merge the settings into the existing configuration and preserve the current interface options.
+Select **Rule** and enable **TUN** in Clash Verge Rev. Merge the fields below into the current configuration, retaining existing interface options. Apply it and inspect the configuration the core actually loaded.
 
 ```yaml
 mode: rule
@@ -27,26 +26,31 @@ tun:
     - tcp://any:53
 ```
 
-`auto-route` and `strict-route` control route capture. The two interception rules cover ordinary UDP and TCP queries on port 53. Check connection records separately for applications that perform their own DNS resolution over HTTPS.
+| Setting | What it does here |
+| --- | --- |
+| `mode: rule` | Domestic HTTPS can match `DIRECT` while Claude matches its own group. The same core handles both connections and chooses a different outbound route for each. |
+| `auto-route` and `strict-route` | The first sends the relevant operating-system traffic into the virtual interface. On Windows, the second tightens routing and restricts DNS queries across multiple interfaces. Recheck the path whenever TUN stops. |
+| `any:53` and `tcp://any:53` | The first intercepts UDP port 53 by default. The second covers TCP port 53. A browser running its own DoH usually uses HTTPS; inspect its resolver connection separately. |
+| `find-process-mode: strict` | The core looks up the process when a rule needs it. That lets a rule target UDP from `chrome.exe` specifically. |
 
-## 3. Apply the dedicated route and DNS settings
+[Mihomo TUN](https://wiki.metacubex.one/en/config/inbound/tun/) · [Process matching](https://wiki.metacubex.one/en/config/general/)
 
-Configure the node, group, domain rules, and DNS settings using the shared procedure. Put the Windows Chrome UDP rule first, followed by the Claude rules and the original subscription rules. Save the changes in the **active subscription's persistent override**, apply that subscription, and inspect the resulting configuration. [Shared procedure](ROUTING.md)
+## 3. Bind the dedicated route and DNS to the active subscription
 
-Open a Claude endpoint covered by the rules and a Bilibili page. In the core's connections view, the first connection should use `Claude-Fixed` and the second should match `DIRECT` if the original rules allow it. Check the group's actual membership again after a source node changes name.
+1. Apply the [shared configuration](ROUTING.md) in the active subscription's persistent script. Leave `android = false` on Windows. Save and reapply the subscription. In the generated configuration, confirm that Chrome UDP comes first and the dedicated group contains only the intended node. This checks that the core received your edit. [Clash Verge Rev script guide](https://clash-verge-rev.github.io/guide/script.html)
+2. Open **Connections** and trigger a fresh Claude request and a Bilibili HTTPS request. Claude should match `Claude-Fixed`. The domestic rule should send Bilibili to `DIRECT`. Check both the matching rule and the final outbound route. A page loading successfully only shows that *some* route worked.
 
-## 4. Restrict WebRTC candidates in Chrome
+## 4. Restrict the WebRTC addresses Chrome gives to pages
 
-1. Open **WebRTC Control → Options**. In the tested version, set D to **Disable non proxied udp**.
-2. Enable A, **Block WebRTC Support Detection**, and C, **Block Additional WebRTC Objects**. Confirm that the extension displays **ON**.
-3. Refresh the test page. Check the top-level page and an iframe, and use multiple STUN targets on both domestic and overseas networks.
-4. Check Chrome UDP traffic in the connections view. The first fallback rule is `AND,((PROCESS-NAME,chrome.exe),(NETWORK,UDP)),REJECT`. It also affects QUIC, browser calls, and conferencing in Chrome.
+1. In **WebRTC Control → Options**, set D to **Disable non proxied udp**. To establish a call, WebRTC looks for reachable addresses. Restricting direct UDP reduces the chance that a STUN server discovers a public address through a different exit.
+2. Enable A, **Block WebRTC Support Detection**, and C, **Block Additional WebRTC Objects**. Confirm protection is **ON**. These controls restrict how pages detect or use the relevant APIs. Reload the test page so the new document picks up the settings. Test both the page and an iframe, which has its own script environment.
+3. Check the core rule `AND,((PROCESS-NAME,chrome.exe),(NETWORK,UDP)),REJECT`. It rejects UDP that the core attributes to Chrome, including traffic used by QUIC, voice, and video. Sample both domestic and overseas STUN targets. An initial test against overseas targets missed a direct address that a domestic target later found.
 
-An initial check using only overseas STUN targets missed a domestic public candidate. A broader test exposed it. After the stricter settings were applied, the tested pages returned an empty candidate list. The Windows sample recorded no live hit on the fallback UDP rule. An attempt to set a system-level Chrome WebRTC policy had failed, so the recorded result rests on the extension settings and the page tests.
+After the settings were tightened, the tested Windows pages returned no candidates. The core recorded no hit on the fallback UDP rule during that run. Record these two observations separately. [WebRTC IP address handling](https://www.rfc-editor.org/rfc/rfc8828.html) · [How to read candidates](VERIFICATION.md)
 
 ## 5. Set the Claude Code proxy and process time zone
 
-Merge these entries into `env` in the user-level `~/.claude/settings.json`. The example uses local HTTP mixed port `7897`. Use the port shown by your client and preserve existing permission, MCP, and application settings.
+**Merge** these keys into `env` in the user-level `~/.claude/settings.json`. Preserve other settings. Replace both instances of `7897` with the mixed port recorded in step 1.
 
 ```json
 {
@@ -59,24 +63,12 @@ Merge these entries into `env` in the user-level `~/.claude/settings.json`. The 
 }
 ```
 
-Exit all old Claude Code processes before starting a new one. If the route differs from the configured value, check for lowercase proxy variables that take precedence. The recorded startup test used an isolated CLI configuration, dummy credentials, and a loopback proxy that returned HTTP 503. It observed both the process time zone and an HTTPS CONNECT request. [Claude Code network configuration](https://code.claude.com/docs/en/network-config)
+- `HTTP_PROXY` and `HTTPS_PROXY` direct CLI requests to the proxy on loopback. The `http://` in the value describes the connection to that local proxy. For an HTTPS destination, the CLI can open a tunnel with `CONNECT` and establish TLS to the destination inside it.
+- `NO_PROXY` lets local services communicate directly. Adding a remote service domain would let matching requests skip the explicit CLI proxy. If the expected connection is missing, check existing proxy variables, including lowercase variants and their precedence. [Claude Code network configuration](https://code.claude.com/docs/en/network-config)
+- `TZ` controls how the process displays local time. `America/Los_Angeles` includes daylight saving rules. Fully quit and restart the CLI so the new process reads the settings. Run `Get-TimeZone` in a separate PowerShell to check the system's UTC+8 setting. Changing a displayed time zone does not move network egress.
 
-## Restore the Chrome new-tab page
-
-The experimental time-zone override initially returned Los Angeles time in five browser contexts. Its replacement new-tab page subsequently failed to open. The following steps restored normal browsing.
-
-1. Cancel the debugging notice from the time-zone extension at the top of Chrome.
-2. Open `chrome://extensions` and remove the custom Los Angeles time-zone extension. **WebRTC Control is a separate protection**.
-3. Close the affected tab, press `Ctrl+T`, enter a normal URL, and test navigation and refresh.
-4. In PowerShell, `Get-TimeZone` should show `China Standard Time` for this UTC+8 setup. After recovery, the top-level page, cross-origin iframe, Web Worker, Shared Worker, and Service Worker all reported `Asia/Shanghai`. The January and July values of `getTimezoneOffset()` were both `-480`.
-
-To restore the system setting, open **Settings → Time & language → Date & time** and select the UTC+08:00 Beijing time zone. The Claude Code `TZ` entry applies to its process. A stable Chrome-only Los Angeles time zone was not achieved in this deployment.
+**Verify it.** Trigger a normal request from a new CLI session and check the local proxy's connections. If Node is installed, enter `! node -p "Intl.DateTimeFormat().resolvedOptions().timeZone"` in the CLI's local command mode to check the time zone inherited by a child process. Running Node in a separate PowerShell only tests that terminal. The recorded test also checked the CLI process itself with an isolated configuration. A local proxy that always returned `503` received `CONNECT api.anthropic.com:443`. That established that the CLI selected the proxy; the test forwarded no request to the API. [CLI local command mode](https://code.claude.com/docs/en/interactive-mode)
 
 ## 6. Verify and roll back
 
-- **Routing and DNS.** Check domestic HTTPS, Claude traffic, and the DoH upstream. Windows retained its IPv6 stack and TUN capture. DNS suppressed AAAA answers, and the dedicated proxy connection used IPv4.
-- **Browser.** Record candidate types, address classes, and timeouts across multiple STUN targets. If you need browser calls, test them separately with the strict UDP rule.
-- **Proxy rollback.** Back up the current state, restore the previous persistent override, and reapply the subscription. Restore the prior TUN setting and ordinary group selection, then test domestic access.
-- **CLI rollback.** Restore the four affected environment entries to their backed-up values. Exit and restart the CLI.
-
-See the [11 verification checks](VERIFICATION.md) for the acceptance criteria and untested scenarios.
+Use the [verification checks](VERIFICATION.md) for domestic HTTPS, the Claude route, the DNS upstream, IPv6, and browser candidates. To roll back, save the current state, restore the original subscription script, and reapply it. Restore the TUN switch, mode, and ordinary group selection. Return the four `env` keys and WebRTC options to their previous values, restart the CLI, reload the page, and compare the same probes.
